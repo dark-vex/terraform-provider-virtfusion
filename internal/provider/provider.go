@@ -28,10 +28,6 @@ type VirtfusionProvider struct {
 type ProviderConfig struct {
 	Client   *http.Client
 	Endpoint string
-	// BaseURL is the single source of truth for composing request URLs
-	// (scheme + host + base API path). All resource code must build
-	// requests through newAPIRequest using a relative path against this
-	// base — never by string-concatenating Endpoint directly.
 	BaseURL  *url.URL
 	ApiToken string
 }
@@ -130,10 +126,6 @@ func (p *VirtfusionProvider) DataSources(ctx context.Context) []func() datasourc
 	return []func() datasource.DataSource{}
 }
 
-// CustomTransport applies authentication only. URL composition is handled
-// centrally by newAPIRequest (see client.go) — this transport must never
-// mutate req.URL, since doing so on top of an already-fully-qualified
-// request is what previously double-embedded the host into the path.
 type CustomTransport struct {
 	Transport http.RoundTripper
 	Token     string
