@@ -7,18 +7,30 @@
 ## Overview
 
 This is a fork of [snowsidejon/terraform-provider-virtfusion](https://github.com/snowsidejon/terraform-provider-virtfusion),
-patched to work against one specific real VirtFusion deployment
-(`vps.hostbrr.com`). It is **not** intended to be upstreamed — the fixes here
-are specific to that deployment's actual API shape, not generic VirtFusion
-behavior.
+patched to fix request handling that meant this provider had never
+successfully issued a request against any real VirtFusion API (see below),
+and to add `terraform import` support for `virtfusion_server`. It is **not**
+intended to be upstreamed — the fixes here are specific to one deployment's
+actual API shape, not generic VirtFusion behavior.
 
-`virtfusion_server` only supports bringing an existing server under
-management via `terraform import`. Create/Update/Delete are deliberately not
-implemented for any resource in this fork — the real mutating request/response
-shapes are unconfirmed, and guessing them risks firing an unverified request
-at a live production server. Every attribute besides `name`/`hostname` on
-`virtfusion_server` is Computed (read-only), so an import followed by
-`terraform plan` should show zero changes.
+All three resources (`virtfusion_server`, `virtfusion_build`,
+`virtfusion_ssh`) keep their original Create/Update/Delete behavior — same
+attributes, same request payloads — now with the URL/auth bug fixed, so
+those requests can actually reach the API for the first time.
+`virtfusion_server` additionally supports `terraform import`, so an existing
+server can be brought under management without going through Create.
+
+**Import caveat:** `virtfusion_server`'s schema is still the original
+create-time schema (`user_id`, `package_id`, `storage`, `memory`, `cores`,
+etc.) — `Read` does not populate these from the real API after an import,
+because the real API doesn't return them in that shape. That means a
+`terraform plan` right after import will typically show a diff for any
+`Required` attribute (e.g. `user_id`) that isn't already set to match reality
+in your config, and if you `apply` that plan, `Update` will send a real
+request to the live server with those values. Review any post-import plan
+carefully — don't `apply` on an imported resource until you're sure the
+config matches the real server, since Update/Delete requests are no longer
+silently broken.
 
 - 🔑 Environment variable support for easy automation
 - 🧩 Fork of the community provider on the [Terraform Registry](https://registry.terraform.io/providers/snowsidejon/virtfusion/latest)
@@ -52,16 +64,93 @@ panel host.
 ### Attributes
 ```hcl
 provider "virtfusion" {
-  endpoint  = "vps.hostbrr.com"
-  api_token = var.api_token
+  endpoint         = "example.com"
+  api_token        = var.api_token
+  os_template      = "Ubuntu Server 22.04"
+  resource_package = 11
+  public_ips       = 1
+  private_ips      = 0
+  hypervisor_group = 14
 }
 ```
 
 ### Environment variables
-| Attribute   | Env Var                | Default            |
-|-------------|-------------------------|--------------------|
-| `endpoint`  | `VIRTFUSION_ENDPOINT`   | _none (required)_  |
-| `api_token` | `VIRTFUSION_API_TOKEN`  | _none (required)_  |
+| Attribute          | Env Var                       | Default                 |
+|--------------------|--------------------------------|--------------------------|
+| `endpoint`         | `VIRTFUSION_ENDPOINT`         | _none (required)_       |
+| `api_token`        | `VIRTFUSION_API_TOKEN`        | _none (required)_       |
+| `os_template`      | `VIRTFUSION_OS_TEMPLATE`      | `Ubuntu Server 22.04`   |
+| `resource_package` | `VIRTFUSION_RESOURCE_PACKAGE` | n/a                      |
+| `public_ips`       | `VIRTFUSION_PUBLIC_IPS`       | `1`                      |
+| `private_ips`      | `VIRTFUSION_PRIVATE_IPS`      | `0`                      |
+| `hypervisor_group` | `VIRTFUSION_HYPERVISOR_GROUP` | n/a                      |
+
+---
+
+## Example: Basic
+
+```hcl
+provider "virtfusion" {}
+
+resource "virtfusion_server" "demo" {
+  user_id = 1
+}
+
+resource "virtfusion_build" "demo" {
+  server_id = virtfusion_server.demo.id
+  name      = "tf-basic"
+  hostname  = "tf-basic.example.com"
+}
+```
+
+Just set your API token and endpoint:
+
+```bash
+export VIRTFUSION_API_TOKEN="your_api_token"
+export VIRTFUSION_ENDPOINT="example.com"
+terraform init
+terraform apply
+```
+
+---
+
+## Example: Advanced
+
+```hcl
+provider "virtfusion" {
+  api_token        = var.api_token
+  os_template      = "Debian 12"
+  resource_package = 15
+  public_ips       = 2
+  private_ips      = 1
+  hypervisor_group = 14
+}
+
+variable "api_token" {
+  type      = string
+  sensitive = true
+}
+
+resource "virtfusion_ssh" "my_key" {
+  user_id    = 1
+  name       = "terraform-key"
+  public_key = "ssh-ed25519 AAAAC3NzExampleKeyGeneratedLocally"
+}
+
+resource "virtfusion_server" "vm" {
+  user_id = 1
+}
+
+resource "virtfusion_build" "vm" {
+  server_id = virtfusion_server.vm.id
+  name      = "adv-vm"
+  hostname  = "adv.example.com"
+  ssh_keys  = [virtfusion_ssh.my_key.id]
+  vnc       = true
+  ipv6      = true
+  email     = true
+}
+```
 
 ---
 
@@ -69,11 +158,13 @@ provider "virtfusion" {
 
 ```hcl
 provider "virtfusion" {
-  endpoint  = "vps.hostbrr.com"
+  endpoint  = "example.com"
   api_token = var.api_token
 }
 
-resource "virtfusion_server" "example" {}
+resource "virtfusion_server" "example" {
+  user_id = 1 # set to match the real server so plan doesn't propose a change
+}
 
 import {
   to = virtfusion_server.example
@@ -84,16 +175,16 @@ import {
 ```bash
 export VIRTFUSION_API_TOKEN="your_api_token"
 terraform init
-terraform plan   # should show 0 changes once state matches the import
+terraform plan   # review carefully before ever applying against a real server
 ```
 
 ---
 
 ## Resources
 
-- `virtfusion_server` → Import and read an existing server (Create/Update/Delete unverified — not implemented)
-- `virtfusion_build` → Schema only; endpoint existence unconfirmed against this deployment (not implemented)
-- `virtfusion_ssh` → Schema only; endpoint existence unconfirmed against this deployment (not implemented)
+- `virtfusion_server` → Create, read, update, delete, and import a VM
+- `virtfusion_build` → Provision and configure servers
+- `virtfusion_ssh` → Manage SSH keys
 
 ---
 

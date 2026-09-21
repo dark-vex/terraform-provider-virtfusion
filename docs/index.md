@@ -42,3 +42,8 @@ variable "api_token" {
 
 - `api_token` (String, Sensitive) API token for authentication.
 - `endpoint` (String) VirtFusion API host (bare host, no scheme), e.g. "example.com". Required; there is no default since this fork targets one specific deployment.
+- `hypervisor_group` (Number) Default hypervisor group ID (location).
+- `os_template` (String) Default OS template name (default: Ubuntu Server 22.04).
+- `private_ips` (Number) Default number of private IPs (default: 0).
+- `public_ips` (Number) Default number of public IPs (default: 1).
+- `resource_package` (Number) Default resource package ID.

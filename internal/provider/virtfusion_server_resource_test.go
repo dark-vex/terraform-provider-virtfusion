@@ -11,114 +11,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
-
-// fakeServerFixtureJSON is a synthesized (not real) server object matching
-// the field shape observed against the live API this fork targets.
-const fakeServerFixtureJSON = `{
-  "data": {
-    "id": "11111111-2222-3333-4444-555555555555",
-    "name": "fixture-server",
-    "hostname": "fixture.example.test",
-    "suspended": false,
-    "protected": true,
-    "migrating": false,
-    "deleting": false,
-    "backupCreating": false,
-    "rescue": false,
-    "vncEnabled": true,
-    "isoMounted": false,
-    "uefi": true,
-    "bootOrder": ["hd", "cdrom"],
-    "memory": "10240 MB",
-    "cpu": "2 Core",
-    "storage": [
-      {"capacity": "80 GB", "enabled": true, "primary": true, "created": "2024-01-01T00:00:00Z"}
-    ],
-    "network": {
-      "primary": {
-        "mac": "aa:bb:cc:dd:ee:ff",
-        "limit": "1",
-        "ipv4": [{"address": "203.0.113.10", "gateway": "203.0.113.1", "netmask": "255.255.255.0"}],
-        "ipv6": [{"subnet": "2001:db8::/64", "gateway": "2001:db8::1", "addresses": ["2001:db8::10"]}]
-      },
-      "secondary": []
-    },
-    "currentMonthlyPeriod": {"start": "2024-01-01T00:00:00Z", "end": "2024-02-01T00:00:00Z"},
-    "created": "2023-06-15T00:00:00Z",
-    "state": null
-  }
-}`
-
-func TestApiServerToModel_MapsFixtureFields(t *testing.T) {
-	var envelope APIServerDetailEnvelope
-	if err := json.Unmarshal([]byte(fakeServerFixtureJSON), &envelope); err != nil {
-		t.Fatalf("failed to decode fixture: %v", err)
-	}
-
-	model := apiServerToModel(envelope.Data)
-
-	if got := model.ID.ValueString(); got != "11111111-2222-3333-4444-555555555555" {
-		t.Errorf("ID = %q", got)
-	}
-	if got := model.Name.ValueString(); got != "fixture-server" {
-		t.Errorf("Name = %q", got)
-	}
-	if !model.Protected.ValueBool() {
-		t.Errorf("Protected = false, want true")
-	}
-	if model.Suspended.ValueBool() {
-		t.Errorf("Suspended = true, want false")
-	}
-	if len(model.BootOrder) != 2 || model.BootOrder[0] != "hd" || model.BootOrder[1] != "cdrom" {
-		t.Errorf("BootOrder = %v", model.BootOrder)
-	}
-	if model.Memory != "10240 MB" {
-		t.Errorf("Memory = %q", model.Memory)
-	}
-	if model.MemoryMB == nil || *model.MemoryMB != 10240 {
-		t.Errorf("MemoryMB = %v, want 10240", model.MemoryMB)
-	}
-	if model.CPU != "2 Core" {
-		t.Errorf("CPU = %q", model.CPU)
-	}
-	if model.CPUCores == nil || *model.CPUCores != 2 {
-		t.Errorf("CPUCores = %v, want 2", model.CPUCores)
-	}
-	if len(model.Storage) != 1 {
-		t.Fatalf("Storage len = %d, want 1", len(model.Storage))
-	}
-	if model.Storage[0].CapacityGB == nil || *model.Storage[0].CapacityGB != 80 {
-		t.Errorf("Storage[0].CapacityGB = %v, want 80", model.Storage[0].CapacityGB)
-	}
-	if model.Network.Primary.MAC != "aa:bb:cc:dd:ee:ff" {
-		t.Errorf("Network.Primary.MAC = %q", model.Network.Primary.MAC)
-	}
-	if len(model.Network.Primary.IPv4) != 1 || model.Network.Primary.IPv4[0].Address != "203.0.113.10" {
-		t.Errorf("Network.Primary.IPv4 = %v", model.Network.Primary.IPv4)
-	}
-	if len(model.Network.Secondary) != 0 {
-		t.Errorf("Network.Secondary len = %d, want 0", len(model.Network.Secondary))
-	}
-	if model.State != nil {
-		t.Errorf("State = %v, want nil (null passthrough)", *model.State)
-	}
-	if model.CurrentMonthlyPeriod.Start != "2024-01-01T00:00:00Z" {
-		t.Errorf("CurrentMonthlyPeriod.Start = %q", model.CurrentMonthlyPeriod.Start)
-	}
-}
-
-// parseLeadingInt is exercised directly to confirm a bad/unexpected format
-// degrades to nil rather than erroring.
-func TestParseLeadingInt_UnparseableReturnsNil(t *testing.T) {
-	if got := parseLeadingInt("unlimited"); got != nil {
-		t.Errorf("parseLeadingInt(unlimited) = %v, want nil", *got)
-	}
-	if got := parseLeadingInt(""); got != nil {
-		t.Errorf("parseLeadingInt(\"\") = %v, want nil", *got)
-	}
-}
 
 func newTestServerResource(t *testing.T, serverURL string) *VirtfusionServerResource {
 	t.Helper()
@@ -134,7 +29,6 @@ func newTestServerResource(t *testing.T, serverURL string) *VirtfusionServerReso
 			Token:     "test-token",
 		}},
 		config: &ProviderConfig{
-			Client:   nil,
 			Endpoint: base.Host,
 			BaseURL:  base,
 			ApiToken: "test-token",
@@ -142,20 +36,24 @@ func newTestServerResource(t *testing.T, serverURL string) *VirtfusionServerReso
 	}
 }
 
+func schemaFor(t *testing.T, r *VirtfusionServerResource) resource.SchemaResponse {
+	t.Helper()
+	schemaResp := &resource.SchemaResponse{}
+	r.Schema(context.Background(), resource.SchemaRequest{}, schemaResp)
+	return *schemaResp
+}
+
 // stateWithID reproduces the exact shape Terraform core hands Read() right
 // after `terraform import`: only "id" is known, every other attribute is
-// explicitly null (not merely zero-valued) — this is what previously
-// crashed Read when it decoded the full model via State.Get.
+// explicitly null (not merely zero-valued).
 func stateWithID(t *testing.T, r *VirtfusionServerResource, id string) tfsdk.State {
 	t.Helper()
 	ctx := context.Background()
 
-	schemaResp := &resource.SchemaResponse{}
-	r.Schema(ctx, resource.SchemaRequest{}, schemaResp)
-
-	schemaType := schemaResp.Schema.Type().TerraformType(ctx)
+	s := schemaFor(t, r)
+	schemaType := s.Schema.Type().TerraformType(ctx)
 	state := tfsdk.State{
-		Schema: schemaResp.Schema,
+		Schema: s.Schema,
 		Raw:    tftypes.NewValue(schemaType, nil), // null object: every attribute null
 	}
 	if diags := state.SetAttribute(ctx, path.Root("id"), id); diags.HasError() {
@@ -166,8 +64,7 @@ func stateWithID(t *testing.T, r *VirtfusionServerResource, id string) tfsdk.Sta
 
 // TestVirtfusionServerResource_Read_RequestShape verifies the fixed URL
 // composition (single "/api/server/<id>" path, no doubled host) and that
-// exactly one Authorization header is sent, then that the response is
-// correctly unwrapped and mapped into state.
+// exactly one Authorization header is sent.
 func TestVirtfusionServerResource_Read_RequestShape(t *testing.T) {
 	const fakeID = "11111111-2222-3333-4444-555555555555"
 
@@ -178,7 +75,7 @@ func TestVirtfusionServerResource_Read_RequestShape(t *testing.T) {
 		gotPath = req.URL.Path
 		authHeaderCount = len(req.Header.Values("Authorization"))
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(fakeServerFixtureJSON))
+		_, _ = w.Write([]byte(`{"data": {"id": "` + fakeID + `"}}`))
 	}))
 	defer srv.Close()
 
@@ -187,9 +84,8 @@ func TestVirtfusionServerResource_Read_RequestShape(t *testing.T) {
 	ctx := context.Background()
 	readReq := resource.ReadRequest{State: stateWithID(t, r, fakeID)}
 
-	schemaResp := &resource.SchemaResponse{}
-	r.Schema(ctx, resource.SchemaRequest{}, schemaResp)
-	readResp := &resource.ReadResponse{State: tfsdk.State{Schema: schemaResp.Schema}}
+	s := schemaFor(t, r)
+	readResp := &resource.ReadResponse{State: tfsdk.State{Schema: s.Schema}}
 
 	r.Read(ctx, readReq, readResp)
 
@@ -210,55 +106,108 @@ func TestVirtfusionServerResource_Read_RequestShape(t *testing.T) {
 	if got.ID.ValueString() != fakeID {
 		t.Errorf("state ID = %q, want %q", got.ID.ValueString(), fakeID)
 	}
-	if got.Memory != "10240 MB" {
-		t.Errorf("state Memory = %q", got.Memory)
-	}
-	if got.MemoryMB == nil || *got.MemoryMB != 10240 {
-		t.Errorf("state MemoryMB = %v", got.MemoryMB)
-	}
 }
 
-// TestVirtfusionServerResource_MutationsAreGated verifies Create, Update and
-// Delete all return the "unverified" diagnostic and never issue a request —
-// the core safety property this fork relies on (no guessed mutating call
-// can ever reach the live account).
-func TestVirtfusionServerResource_MutationsAreGated(t *testing.T) {
-	hits := 0
+// TestVirtfusionServerResource_Create_RequestShape verifies Create composes
+// the correct URL, sends a single Authorization header, and captures the
+// returned (string/UUID) id.
+func TestVirtfusionServerResource_Create_RequestShape(t *testing.T) {
+	const fakeID = "22222222-3333-4444-5555-666666666666"
+
+	var gotPath, gotMethod string
+	var authHeaderCount int
+	var gotBody map[string]interface{}
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		hits++
-		w.WriteHeader(http.StatusOK)
+		gotPath = req.URL.Path
+		gotMethod = req.Method
+		authHeaderCount = len(req.Header.Values("Authorization"))
+		_ = json.NewDecoder(req.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id": "` + fakeID + `"}`))
 	}))
 	defer srv.Close()
 
 	r := newTestServerResource(t, srv.URL)
-
 	ctx := context.Background()
 
-	createResp := &resource.CreateResponse{}
-	r.Create(ctx, resource.CreateRequest{}, createResp)
-	if !createResp.Diagnostics.HasError() {
-		t.Error("Create did not return an error diagnostic")
-	} else if createResp.Diagnostics[0].Summary() != unverifiedMutationSummary {
-		t.Errorf("Create diagnostic summary = %q", createResp.Diagnostics[0].Summary())
+	s := schemaFor(t, r)
+	plan := tfsdk.Plan{Schema: s.Schema}
+	model := VirtfusionServerResourceModel{
+		UserID: types.Int64Value(1),
+	}
+	if diags := plan.Set(ctx, &model); diags.HasError() {
+		t.Fatalf("failed to build test plan: %v", diags)
 	}
 
-	updateResp := &resource.UpdateResponse{}
-	r.Update(ctx, resource.UpdateRequest{}, updateResp)
-	if !updateResp.Diagnostics.HasError() {
-		t.Error("Update did not return an error diagnostic")
-	} else if updateResp.Diagnostics[0].Summary() != unverifiedMutationSummary {
-		t.Errorf("Update diagnostic summary = %q", updateResp.Diagnostics[0].Summary())
+	createResp := &resource.CreateResponse{State: tfsdk.State{Schema: s.Schema}}
+	r.Create(ctx, resource.CreateRequest{Plan: plan}, createResp)
+
+	if createResp.Diagnostics.HasError() {
+		t.Fatalf("Create returned diagnostics: %v", createResp.Diagnostics)
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("method = %q, want POST", gotMethod)
+	}
+	if gotPath != "/api/v1/servers" {
+		t.Errorf("request path = %q, want %q", gotPath, "/api/v1/servers")
+	}
+	if authHeaderCount != 1 {
+		t.Errorf("Authorization header count = %d, want 1", authHeaderCount)
+	}
+	if gotBody["user_id"] != float64(1) {
+		t.Errorf("request body user_id = %v, want 1", gotBody["user_id"])
+	}
+
+	var got VirtfusionServerResourceModel
+	if diags := createResp.State.Get(ctx, &got); diags.HasError() {
+		t.Fatalf("failed to read back state: %v", diags)
+	}
+	if got.ID.ValueString() != fakeID {
+		t.Errorf("state ID = %q, want %q", got.ID.ValueString(), fakeID)
+	}
+}
+
+// TestVirtfusionServerResource_Delete_RequestShape verifies Delete composes
+// the correct URL for a UUID id and sends a single Authorization header.
+func TestVirtfusionServerResource_Delete_RequestShape(t *testing.T) {
+	const fakeID = "33333333-4444-5555-6666-777777777777"
+
+	var gotPath, gotMethod string
+	var authHeaderCount int
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		gotPath = req.URL.Path
+		gotMethod = req.Method
+		authHeaderCount = len(req.Header.Values("Authorization"))
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	r := newTestServerResource(t, srv.URL)
+	ctx := context.Background()
+
+	s := schemaFor(t, r)
+	state := tfsdk.State{Schema: s.Schema}
+	model := VirtfusionServerResourceModel{ID: types.StringValue(fakeID)}
+	if diags := state.Set(ctx, &model); diags.HasError() {
+		t.Fatalf("failed to build test state: %v", diags)
 	}
 
 	deleteResp := &resource.DeleteResponse{}
-	r.Delete(ctx, resource.DeleteRequest{}, deleteResp)
-	if !deleteResp.Diagnostics.HasError() {
-		t.Error("Delete did not return an error diagnostic")
-	} else if deleteResp.Diagnostics[0].Summary() != unverifiedMutationSummary {
-		t.Errorf("Delete diagnostic summary = %q", deleteResp.Diagnostics[0].Summary())
-	}
+	r.Delete(ctx, resource.DeleteRequest{State: state}, deleteResp)
 
-	if hits != 0 {
-		t.Errorf("gated mutation reached the test server %d time(s), want 0", hits)
+	if deleteResp.Diagnostics.HasError() {
+		t.Fatalf("Delete returned diagnostics: %v", deleteResp.Diagnostics)
+	}
+	if gotMethod != http.MethodDelete {
+		t.Errorf("method = %q, want DELETE", gotMethod)
+	}
+	if gotPath != "/api/v1/servers/"+fakeID {
+		t.Errorf("request path = %q, want %q", gotPath, "/api/v1/servers/"+fakeID)
+	}
+	if authHeaderCount != 1 {
+		t.Errorf("Authorization header count = %d, want 1", authHeaderCount)
 	}
 }
