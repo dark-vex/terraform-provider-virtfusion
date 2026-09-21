@@ -41,8 +41,7 @@ func (r *VirtfusionServerBuildResource) Metadata(ctx context.Context, req resour
 
 func (r *VirtfusionServerBuildResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Represents a VirtFusion server build. The existence and shape of this API endpoint " +
-			"under this fork's deployment is unconfirmed; Create/Update/Delete are not implemented.",
+		MarkdownDescription: "Represents a VirtFusion server build.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.Int64Attribute{
 				Computed: true,

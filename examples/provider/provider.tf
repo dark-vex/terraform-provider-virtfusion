@@ -10,7 +10,7 @@ terraform {
 # endpoint and api_token are both required; this fork has no default panel
 # host, since it targets one specific VirtFusion deployment.
 provider "virtfusion" {
-  endpoint  = "vps.hostbrr.com"
+  endpoint  = "example.com"
   api_token = var.api_token
 }
 

@@ -3,12 +3,12 @@
 page_title: "virtfusion_ssh Resource - terraform-provider-virtfusion"
 subcategory: ""
 description: |-
-  Represents a VirtFusion SSH key. The existence and shape of this API endpoint under this fork's deployment is unconfirmed; Create/Update/Delete are not implemented.
+  Represents a VirtFusion SSH key.
 ---
 
 # virtfusion_ssh (Resource)
 
-Represents a VirtFusion SSH key. The existence and shape of this API endpoint under this fork's deployment is unconfirmed; Create/Update/Delete are not implemented.
+Represents a VirtFusion SSH key.
 
 ## Example Usage
 

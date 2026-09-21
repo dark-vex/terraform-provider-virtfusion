@@ -3,12 +3,12 @@
 page_title: "virtfusion_build Resource - terraform-provider-virtfusion"
 subcategory: ""
 description: |-
-  Represents a VirtFusion server build. The existence and shape of this API endpoint under this fork's deployment is unconfirmed; Create/Update/Delete are not implemented.
+  Represents a VirtFusion server build.
 ---
 
 # virtfusion_build (Resource)
 
-Represents a VirtFusion server build. The existence and shape of this API endpoint under this fork's deployment is unconfirmed; Create/Update/Delete are not implemented.
+Represents a VirtFusion server build.
 
 ## Example Usage
 

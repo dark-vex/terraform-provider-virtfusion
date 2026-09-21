@@ -51,7 +51,7 @@ func (p *VirtfusionProvider) Schema(ctx context.Context, req provider.SchemaRequ
 	resp.Schema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
 			"endpoint": schema.StringAttribute{
-				MarkdownDescription: "VirtFusion API host (bare host, no scheme), e.g. \"vps.hostbrr.com\". Required; there is no default since this fork targets one specific deployment.",
+				MarkdownDescription: "VirtFusion API host (bare host, no scheme), e.g. \"example.com\". Required; there is no default since this fork targets one specific deployment.",
 				Optional:            true,
 			},
 			"api_token": schema.StringAttribute{
