@@ -4,7 +4,7 @@
 package provider
 
 // Typed representations of the real VirtFusion server API shape observed
-// against this fork's deployment (see CODE-27). This intentionally does not
+// against this fork's deployment. This intentionally does not
 // attempt to model fields that have not been observed on the wire.
 
 // APIServerListEnvelope is the Laravel-style pagination envelope returned by

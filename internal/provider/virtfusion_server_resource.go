@@ -136,7 +136,7 @@ func networkInterfaceAttributes() map[string]schema.Attribute {
 func (r *VirtfusionServerResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Represents a VirtFusion server. Create/Update/Delete are not implemented against this " +
-			"fork's real API shape (unverified — see CODE-27); this resource is intended to be brought under " +
+			"fork's real API shape (unverified); this resource is intended to be brought under " +
 			"management exclusively via `terraform import`.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -253,7 +253,7 @@ func (r *VirtfusionServerResource) ImportState(ctx context.Context, req resource
 const unverifiedMutationSummary = "Not verified against this VirtFusion deployment"
 
 const unverifiedMutationDetail = "The request/response shape for this operation has not been confirmed against the " +
-	"real VirtFusion API this fork targets (see CODE-27). Sending a guessed payload could mutate a live production " +
+	"real VirtFusion API this fork targets. Sending a guessed payload could mutate a live production " +
 	"server, so this is deliberately not implemented. Bring existing servers under management with `terraform " +
 	"import` instead."
 

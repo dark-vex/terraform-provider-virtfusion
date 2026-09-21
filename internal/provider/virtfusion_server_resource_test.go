@@ -15,7 +15,7 @@ import (
 )
 
 // fakeServerFixtureJSON is a synthesized (not real) server object matching
-// the field shape observed against the live API in CODE-27.
+// the field shape observed against the live API this fork targets.
 const fakeServerFixtureJSON = `{
   "data": {
     "id": "11111111-2222-3333-4444-555555555555",
@@ -220,8 +220,8 @@ func TestVirtfusionServerResource_Read_RequestShape(t *testing.T) {
 
 // TestVirtfusionServerResource_MutationsAreGated verifies Create, Update and
 // Delete all return the "unverified" diagnostic and never issue a request —
-// the core safety property for CODE-27 (no guessed mutating call can ever
-// reach the live account).
+// the core safety property this fork relies on (no guessed mutating call
+// can ever reach the live account).
 func TestVirtfusionServerResource_MutationsAreGated(t *testing.T) {
 	hits := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {

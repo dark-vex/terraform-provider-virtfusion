@@ -37,7 +37,7 @@ func (r *VirtfusionSSHResource) Metadata(ctx context.Context, req resource.Metad
 func (r *VirtfusionSSHResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Represents a VirtFusion SSH key. The existence and shape of this API endpoint under " +
-			"this fork's deployment is unconfirmed (see CODE-27); Create/Update/Delete are not implemented.",
+			"this fork's deployment is unconfirmed; Create/Update/Delete are not implemented.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.Int64Attribute{
 				Computed: true,
@@ -84,7 +84,7 @@ func (r *VirtfusionSSHResource) Read(ctx context.Context, req resource.ReadReque
 		return
 	}
 
-	// Endpoint path unconfirmed for this fork's deployment (see CODE-27).
+	// Endpoint path unconfirmed for this fork's deployment.
 	relPath := "/ssh-keys/" + strconv.FormatInt(data.ID.ValueInt64(), 10)
 	httpReq, err := newAPIRequest(ctx, r.config, "GET", relPath, nil)
 	if err != nil {

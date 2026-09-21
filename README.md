@@ -10,7 +10,7 @@ This is a fork of [snowsidejon/terraform-provider-virtfusion](https://github.com
 patched to work against one specific real VirtFusion deployment
 (`vps.hostbrr.com`). It is **not** intended to be upstreamed — the fixes here
 are specific to that deployment's actual API shape, not generic VirtFusion
-behavior. See CODE-27.
+behavior.
 
 `virtfusion_server` only supports bringing an existing server under
 management via `terraform import`. Create/Update/Delete are deliberately not
@@ -73,10 +73,10 @@ provider "virtfusion" {
   api_token = var.api_token
 }
 
-resource "virtfusion_server" "rmon_vpn" {}
+resource "virtfusion_server" "example" {}
 
 import {
-  to = virtfusion_server.rmon_vpn
+  to = virtfusion_server.example
   id = "385e8f86-6cc8-4f88-8d1e-a8fece0f6b32" # server UUID
 }
 ```

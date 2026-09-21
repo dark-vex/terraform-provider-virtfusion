@@ -1,6 +1,6 @@
 # virtfusion_server only supports bringing an existing server under
 # management via `terraform import` — Create/Update/Delete are not
-# implemented against this fork's real API shape (see CODE-27). All
+# implemented against this fork's real API shape. All
 # attributes besides name/hostname are read-only (Computed).
 resource "virtfusion_server" "node1" {}
 
