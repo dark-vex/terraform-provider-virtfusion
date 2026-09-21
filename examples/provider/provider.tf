@@ -1,7 +1,7 @@
 terraform {
   required_providers {
     virtfusion = {
-      source  = "snowsidejon/virtfusion"
+      source  = "dark-vex/virtfusion"
       version = "1.1.0"
     }
   }

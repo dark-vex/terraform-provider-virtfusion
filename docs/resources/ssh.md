@@ -3,12 +3,12 @@
 page_title: "virtfusion_ssh Resource - terraform-provider-virtfusion"
 subcategory: ""
 description: |-
-  Represents a VirtFusion SSH key.
+  Virtfusion SSH Resource
 ---
 
 # virtfusion_ssh (Resource)
 
-Represents a VirtFusion SSH key.
+Virtfusion SSH Resource
 
 ## Example Usage
 
@@ -29,10 +29,10 @@ resource "virtfusion_ssh" "dummy_key" {
 
 ### Required
 
-- `name` (String)
-- `public_key` (String)
-- `user_id` (Number)
+- `name` (String) Key Name
+- `public_key` (String) Public Key
+- `user_id` (Number) User ID
 
 ### Read-Only
 
-- `id` (Number) The ID of this resource.
+- `id` (Number) SSH Key ID

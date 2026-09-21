@@ -30,9 +30,9 @@ resource "virtfusion_build" "node1" {
 
 ### Required
 
-- `hostname` (String)
-- `name` (String)
-- `server_id` (Number)
+- `hostname` (String) Server Hostname
+- `name` (String) Server Name
+- `server_id` (Number) Server ID
 
 ### Optional
 
