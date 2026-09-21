@@ -111,6 +111,63 @@ func TestVirtfusionSSHResource_Create_RequestShape(t *testing.T) {
 	}
 }
 
+// TestVirtfusionSSHResource_Create_EmptyResponseBody_FallsBackToList
+// reproduces a real deployment's actual behavior found via live testing:
+// POST /account/sshKeys returns 200 with a completely empty body (not the
+// documented list envelope), even though the key is created successfully
+// server-side. Create must fall back to a fresh list+scan by public_key
+// instead of treating the empty/unparsable body as an error.
+func TestVirtfusionSSHResource_Create_EmptyResponseBody_FallsBackToList(t *testing.T) {
+	postHits, listHits := 0, 0
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch req.Method {
+		case http.MethodPost:
+			postHits++
+			w.WriteHeader(http.StatusOK) // empty body, as observed live
+		case http.MethodGet:
+			listHits++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data": [{"id": 7, "name": "fallback key", "publicKey": "ssh-ed25519 FALLBACK", "type": "OpenSSH", "enabled": true, "created": "2024-01-01T00:00:00Z"}], "next_page_url": null, "total": 1}`))
+		}
+	}))
+	defer srv.Close()
+
+	r := newTestSSHResource(t, srv.URL)
+	ctx := context.Background()
+
+	s := sshSchemaFor(t, r)
+	plan := tfsdk.Plan{Schema: s.Schema}
+	model := VirtfusionSSHResourceModel{
+		Name:      types.StringValue("fallback key"),
+		PublicKey: types.StringValue("ssh-ed25519 FALLBACK"),
+	}
+	if diags := plan.Set(ctx, &model); diags.HasError() {
+		t.Fatalf("failed to build test plan: %v", diags)
+	}
+
+	createResp := &resource.CreateResponse{State: tfsdk.State{Schema: s.Schema}}
+	r.Create(ctx, resource.CreateRequest{Plan: plan}, createResp)
+
+	if createResp.Diagnostics.HasError() {
+		t.Fatalf("Create returned diagnostics: %v", createResp.Diagnostics)
+	}
+	if postHits != 1 {
+		t.Errorf("POST hits = %d, want 1", postHits)
+	}
+	if listHits != 1 {
+		t.Errorf("fallback GET list hits = %d, want 1", listHits)
+	}
+
+	var got VirtfusionSSHResourceModel
+	if diags := createResp.State.Get(ctx, &got); diags.HasError() {
+		t.Fatalf("failed to read back state: %v", diags)
+	}
+	if got.ID.ValueInt64() != 7 {
+		t.Errorf("state ID = %d, want 7", got.ID.ValueInt64())
+	}
+}
+
 // TestVirtfusionSSHResource_Read_FollowsPagination verifies Read paginates
 // through next_page_url to find a key on a later page.
 func TestVirtfusionSSHResource_Read_FollowsPagination(t *testing.T) {

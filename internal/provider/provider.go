@@ -5,9 +5,11 @@ package provider
 
 import (
 	"context"
+	"crypto/tls"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
@@ -34,8 +36,9 @@ type ProviderConfig struct {
 
 // VirtfusionProviderModel describes the provider schema.
 type VirtfusionProviderModel struct {
-	Endpoint types.String `tfsdk:"endpoint"`
-	ApiToken types.String `tfsdk:"api_token"`
+	Endpoint           types.String `tfsdk:"endpoint"`
+	ApiToken           types.String `tfsdk:"api_token"`
+	InsecureSkipVerify types.Bool   `tfsdk:"insecure_skip_verify"`
 }
 
 func (p *VirtfusionProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
@@ -54,6 +57,12 @@ func (p *VirtfusionProvider) Schema(ctx context.Context, req provider.SchemaRequ
 				MarkdownDescription: "API token for authentication.",
 				Optional:            true,
 				Sensitive:           true,
+			},
+			"insecure_skip_verify": schema.BoolAttribute{
+				MarkdownDescription: "Skip TLS certificate verification. Only for internal/trial deployments " +
+					"with self-signed certificates — never enable this against a production endpoint. " +
+					"Default: false.",
+				Optional: true,
 			},
 		},
 	}
@@ -95,9 +104,22 @@ func (p *VirtfusionProvider) Configure(ctx context.Context, req provider.Configu
 
 	baseURL := &url.URL{Scheme: "https", Host: endpoint, Path: "/api"}
 
+	insecureSkipVerify := false
+	if !data.InsecureSkipVerify.IsNull() {
+		insecureSkipVerify = data.InsecureSkipVerify.ValueBool()
+	} else if env := os.Getenv("VIRTFUSION_INSECURE_SKIP_VERIFY"); env != "" {
+		if v, err := strconv.ParseBool(env); err == nil {
+			insecureSkipVerify = v
+		}
+	}
+
 	// Build HTTP client
+	var baseTransport http.RoundTripper = http.DefaultTransport
+	if insecureSkipVerify {
+		baseTransport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	}
 	customTransport := &CustomTransport{
-		Transport: http.DefaultTransport,
+		Transport: baseTransport,
 		Token:     apiToken,
 	}
 	client := &http.Client{Transport: customTransport}

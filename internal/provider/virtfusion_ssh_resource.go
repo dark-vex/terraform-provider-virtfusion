@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	stdpath "path"
 	"strconv"
@@ -109,7 +110,15 @@ func (r *VirtfusionSSHResource) Create(ctx context.Context, req resource.CreateR
 		resp.Diagnostics.AddError("API request failed", err.Error())
 		return
 	}
-	defer httpResp.Body.Close()
+
+	// The documented create response is the same paginated list envelope as
+	// a plain list — but live testing against a real deployment showed a
+	// 200 with a completely empty body instead (the key is still created
+	// server-side either way). Try the documented shape first; if the body
+	// is empty or doesn't parse, fall back to a fresh list+scan by
+	// public_key rather than erroring out on an already-succeeded create.
+	bodyBytes, readErr := io.ReadAll(httpResp.Body)
+	httpResp.Body.Close()
 
 	if httpResp.StatusCode != http.StatusOK && httpResp.StatusCode != http.StatusCreated {
 		resp.Diagnostics.AddError(
@@ -118,21 +127,33 @@ func (r *VirtfusionSSHResource) Create(ctx context.Context, req resource.CreateR
 		)
 		return
 	}
-
-	// The create response is the same paginated list envelope as a plain
-	// list (not the single created object) — find our new key by matching
-	// the public key we just submitted.
-	var envelope APISSHKeyListEnvelope
-	if err := json.NewDecoder(httpResp.Body).Decode(&envelope); err != nil {
-		resp.Diagnostics.AddError("Error decoding API response", err.Error())
+	if readErr != nil {
+		resp.Diagnostics.AddError("Error reading API response", readErr.Error())
 		return
 	}
 
-	key, found := findSSHKeyByPublicKey(envelope.Data, data.PublicKey.ValueString())
+	var key APISSHKey
+	found := false
+	if len(bodyBytes) > 0 {
+		var envelope APISSHKeyListEnvelope
+		if err := json.Unmarshal(bodyBytes, &envelope); err == nil {
+			key, found = findSSHKeyByPublicKey(envelope.Data, data.PublicKey.ValueString())
+		}
+	}
+
+	if !found {
+		keys, diags := r.listAllSSHKeys(ctx)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		key, found = findSSHKeyByPublicKey(keys, data.PublicKey.ValueString())
+	}
 	if !found {
 		resp.Diagnostics.AddError(
 			"SSH key not found after creation",
-			"The create response's key list did not contain a key matching the submitted public_key.",
+			"The key was submitted successfully, but no key matching the submitted public_key could be found "+
+				"afterward (checked the create response and a fresh list).",
 		)
 		return
 	}
@@ -150,11 +171,13 @@ func (r *VirtfusionSSHResource) Read(ctx context.Context, req resource.ReadReque
 		return
 	}
 
-	key, found, diags := r.findSSHKeyByID(ctx, data.ID.ValueInt64())
+	keys, diags := r.listAllSSHKeys(ctx)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	key, found := findSSHKeyByID(keys, data.ID.ValueInt64())
 	if !found {
 		resp.State.RemoveResource(ctx)
 		return
@@ -210,22 +233,32 @@ func findSSHKeyByPublicKey(keys []APISSHKey, publicKey string) (APISSHKey, bool)
 	return APISSHKey{}, false
 }
 
-// findSSHKeyByID walks GET /account/sshKeys, following next_page_url, until
-// it finds a key with the given id or runs out of pages.
-func (r *VirtfusionSSHResource) findSSHKeyByID(ctx context.Context, id int64) (APISSHKey, bool, diag.Diagnostics) {
+func findSSHKeyByID(keys []APISSHKey, id int64) (APISSHKey, bool) {
+	for _, k := range keys {
+		if k.ID == id {
+			return k, true
+		}
+	}
+	return APISSHKey{}, false
+}
+
+// listAllSSHKeys walks GET /account/sshKeys, following next_page_url until
+// it runs out of pages, and returns every key on the account.
+func (r *VirtfusionSSHResource) listAllSSHKeys(ctx context.Context) ([]APISSHKey, diag.Diagnostics) {
 	var diags diag.Diagnostics
+	var all []APISSHKey
 
 	httpReq, err := newAPIRequest(ctx, r.config, "GET", "/account/sshKeys", nil)
 	if err != nil {
 		diags.AddError("Error creating request", err.Error())
-		return APISSHKey{}, false, diags
+		return nil, diags
 	}
 
 	for {
 		httpResp, err := r.client.Do(httpReq)
 		if err != nil {
 			diags.AddError("API request failed", err.Error())
-			return APISSHKey{}, false, diags
+			return nil, diags
 		}
 
 		var envelope APISSHKeyListEnvelope
@@ -235,27 +268,23 @@ func (r *VirtfusionSSHResource) findSSHKeyByID(ctx context.Context, id int64) (A
 
 		if status != http.StatusOK {
 			diags.AddError("Unexpected API Response", fmt.Sprintf("unexpected status %d listing SSH keys", status))
-			return APISSHKey{}, false, diags
+			return nil, diags
 		}
 		if decodeErr != nil {
 			diags.AddError("Error decoding API response", decodeErr.Error())
-			return APISSHKey{}, false, diags
+			return nil, diags
 		}
 
-		for _, k := range envelope.Data {
-			if k.ID == id {
-				return k, true, nil
-			}
-		}
+		all = append(all, envelope.Data...)
 
 		if envelope.NextPageURL == nil {
-			return APISSHKey{}, false, nil
+			return all, nil
 		}
 
 		httpReq, err = newAPIRequestAbsolute(ctx, "GET", *envelope.NextPageURL, nil)
 		if err != nil {
 			diags.AddError("Error creating request", err.Error())
-			return APISSHKey{}, false, diags
+			return nil, diags
 		}
 	}
 }
