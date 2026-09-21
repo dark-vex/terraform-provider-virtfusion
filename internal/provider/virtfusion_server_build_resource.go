@@ -1,9 +1,7 @@
 package provider
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -43,6 +41,8 @@ func (r *VirtfusionServerBuildResource) Metadata(ctx context.Context, req resour
 
 func (r *VirtfusionServerBuildResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		MarkdownDescription: "Represents a VirtFusion server build. The existence and shape of this API endpoint " +
+			"under this fork's deployment is unconfirmed (see CODE-27); Create/Update/Delete are not implemented.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.Int64Attribute{
 				Computed: true,
@@ -95,70 +95,7 @@ func (r *VirtfusionServerBuildResource) Configure(ctx context.Context, req resou
 }
 
 func (r *VirtfusionServerBuildResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var data VirtfusionServerBuildResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	// If no osid provided, try to resolve from provider default OsTemplate
-	if data.OsID.IsNull() && r.config.OsTemplate != "" {
-		osid, err := resolveOsTemplateToID(r.client, r.config.Endpoint, r.config.ApiToken, r.config.OsTemplate)
-		if err != nil {
-			resp.Diagnostics.AddError("OS Template Resolution Failed", err.Error())
-			return
-		}
-		data.OsID = types.Int64Value(osid)
-	}
-
-	payload := map[string]interface{}{
-		"server_id": data.ServerID.ValueInt64(),
-		"name":      data.Name.ValueString(),
-		"hostname":  data.Hostname.ValueString(),
-		"osid":      data.OsID.ValueInt64(),
-		"vnc":       data.VNC.ValueBool(),
-		"ipv6":      data.IPv6.ValueBool(),
-		"ssh_keys":  flattenInt64List(data.SSHKeys),
-		"email":     data.Email.ValueBool(),
-	}
-
-	body, _ := json.Marshal(payload)
-	reqURL := r.config.Endpoint + "/api/v1/build"
-
-	httpReq, err := http.NewRequest("POST", reqURL, bytes.NewBuffer(body))
-	if err != nil {
-		resp.Diagnostics.AddError("Error creating request", err.Error())
-		return
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+r.config.ApiToken)
-
-	httpResp, err := r.client.Do(httpReq)
-	if err != nil {
-		resp.Diagnostics.AddError("API request failed", err.Error())
-		return
-	}
-	defer httpResp.Body.Close()
-
-	if httpResp.StatusCode != 200 && httpResp.StatusCode != 201 {
-		resp.Diagnostics.AddError(
-			"Unexpected API Response",
-			fmt.Sprintf("Status: %d", httpResp.StatusCode),
-		)
-		return
-	}
-
-	var respData map[string]interface{}
-	if err := json.NewDecoder(httpResp.Body).Decode(&respData); err != nil {
-		resp.Diagnostics.AddError("Error decoding API response", err.Error())
-		return
-	}
-
-	if id, ok := respData["id"].(float64); ok {
-		data.ID = types.Int64Value(int64(id))
-	}
-
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	resp.Diagnostics.AddError(unverifiedMutationSummary, unverifiedMutationDetail)
 }
 
 func (r *VirtfusionServerBuildResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -168,9 +105,13 @@ func (r *VirtfusionServerBuildResource) Read(ctx context.Context, req resource.R
 		return
 	}
 
-	reqURL := r.config.Endpoint + "/api/v1/build/" + strconv.FormatInt(data.ID.ValueInt64(), 10)
-	httpReq, _ := http.NewRequest("GET", reqURL, nil)
-	httpReq.Header.Set("Authorization", "Bearer "+r.config.ApiToken)
+	// Endpoint path unconfirmed for this fork's deployment (see CODE-27).
+	relPath := "/build/" + strconv.FormatInt(data.ID.ValueInt64(), 10)
+	httpReq, err := newAPIRequest(ctx, r.config, "GET", relPath, nil)
+	if err != nil {
+		resp.Diagnostics.AddError("Error creating request", err.Error())
+		return
+	}
 
 	httpResp, err := r.client.Do(httpReq)
 	if err != nil {
@@ -179,11 +120,11 @@ func (r *VirtfusionServerBuildResource) Read(ctx context.Context, req resource.R
 	}
 	defer httpResp.Body.Close()
 
-	if httpResp.StatusCode == 404 {
+	if httpResp.StatusCode == http.StatusNotFound {
 		resp.State.RemoveResource(ctx)
 		return
 	}
-	if httpResp.StatusCode != 200 {
+	if httpResp.StatusCode != http.StatusOK {
 		resp.Diagnostics.AddError("Unexpected API Response", fmt.Sprintf("Status: %d", httpResp.StatusCode))
 		return
 	}
@@ -192,106 +133,9 @@ func (r *VirtfusionServerBuildResource) Read(ctx context.Context, req resource.R
 }
 
 func (r *VirtfusionServerBuildResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var data VirtfusionServerBuildResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	reqURL := r.config.Endpoint + "/api/v1/build/" + strconv.FormatInt(data.ID.ValueInt64(), 10)
-	payload := map[string]interface{}{
-		"name":     data.Name.ValueString(),
-		"hostname": data.Hostname.ValueString(),
-		"osid":     data.OsID.ValueInt64(),
-		"vnc":      data.VNC.ValueBool(),
-		"ipv6":     data.IPv6.ValueBool(),
-		"ssh_keys": flattenInt64List(data.SSHKeys),
-		"email":    data.Email.ValueBool(),
-	}
-
-	body, _ := json.Marshal(payload)
-	httpReq, _ := http.NewRequest("PUT", reqURL, bytes.NewBuffer(body))
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+r.config.ApiToken)
-
-	httpResp, err := r.client.Do(httpReq)
-	if err != nil {
-		resp.Diagnostics.AddError("API request failed", err.Error())
-		return
-	}
-	defer httpResp.Body.Close()
-
-	if httpResp.StatusCode != 200 {
-		resp.Diagnostics.AddError("Unexpected API Response", fmt.Sprintf("Status: %d", httpResp.StatusCode))
-		return
-	}
-
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	resp.Diagnostics.AddError(unverifiedMutationSummary, unverifiedMutationDetail)
 }
 
 func (r *VirtfusionServerBuildResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	var data VirtfusionServerBuildResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	reqURL := r.config.Endpoint + "/api/v1/build/" + strconv.FormatInt(data.ID.ValueInt64(), 10)
-	httpReq, _ := http.NewRequest("DELETE", reqURL, nil)
-	httpReq.Header.Set("Authorization", "Bearer "+r.config.ApiToken)
-
-	httpResp, err := r.client.Do(httpReq)
-	if err != nil {
-		resp.Diagnostics.AddError("API request failed", err.Error())
-		return
-	}
-	defer httpResp.Body.Close()
-
-	if httpResp.StatusCode != 200 && httpResp.StatusCode != 204 {
-		resp.Diagnostics.AddError("Unexpected API Response", fmt.Sprintf("Status: %d", httpResp.StatusCode))
-		return
-	}
-}
-
-// resolveOsTemplateToID resolves a template name to its numeric ID via API
-func resolveOsTemplateToID(client *http.Client, endpoint, apiToken, templateName string) (int64, error) {
-	reqURL := endpoint + "/api/v1/os-templates"
-	httpReq, _ := http.NewRequest("GET", reqURL, nil)
-	httpReq.Header.Set("Authorization", "Bearer "+apiToken)
-
-	httpResp, err := client.Do(httpReq)
-	if err != nil {
-		return 0, err
-	}
-	defer httpResp.Body.Close()
-
-	if httpResp.StatusCode != 200 {
-		return 0, fmt.Errorf("unexpected status %d while fetching OS templates", httpResp.StatusCode)
-	}
-
-	var respData []map[string]interface{}
-	if err := json.NewDecoder(httpResp.Body).Decode(&respData); err != nil {
-		return 0, err
-	}
-
-	for _, tpl := range respData {
-		if tpl["name"] == templateName {
-			if id, ok := tpl["id"].(float64); ok {
-				return int64(id), nil
-			}
-		}
-	}
-
-	return 0, fmt.Errorf("OS template %q not found", templateName)
-}
-
-// helper to convert []types.Int64 → []int64
-func flattenInt64List(list []types.Int64) []int64 {
-	var result []int64
-	for _, v := range list {
-		if !v.IsNull() {
-			result = append(result, v.ValueInt64())
-		}
-	}
-	return result
+	resp.Diagnostics.AddError(unverifiedMutationSummary, unverifiedMutationDetail)
 }

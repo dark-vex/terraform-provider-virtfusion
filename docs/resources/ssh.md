@@ -3,12 +3,12 @@
 page_title: "virtfusion_ssh Resource - terraform-provider-virtfusion"
 subcategory: ""
 description: |-
-  Virtfusion SSH Resource
+  Represents a VirtFusion SSH key. The existence and shape of this API endpoint under this fork's deployment is unconfirmed (see CODE-27); Create/Update/Delete are not implemented.
 ---
 
 # virtfusion_ssh (Resource)
 
-Virtfusion SSH Resource
+Represents a VirtFusion SSH key. The existence and shape of this API endpoint under this fork's deployment is unconfirmed (see CODE-27); Create/Update/Delete are not implemented.
 
 ## Example Usage
 
@@ -29,11 +29,10 @@ resource "virtfusion_ssh" "dummy_key" {
 
 ### Required
 
-- `name` (String) Key Name
-- `public_key` (String) Public Key
-- `user_id` (Number) User ID
+- `name` (String)
+- `public_key` (String)
+- `user_id` (Number)
 
 ### Read-Only
 
-- `id` (Number) SSH Key ID
-- `public_key_hash` (String) Public Key Hash
+- `id` (Number) The ID of this resource.
