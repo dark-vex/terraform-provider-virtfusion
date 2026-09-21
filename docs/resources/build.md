@@ -3,12 +3,12 @@
 page_title: "virtfusion_build Resource - terraform-provider-virtfusion"
 subcategory: ""
 description: |-
-  Virtfusion Server Build Resource
+  Represents a VirtFusion server build. The existence and shape of this API endpoint under this fork's deployment is unconfirmed; Create/Update/Delete are not implemented.
 ---
 
 # virtfusion_build (Resource)
 
-Virtfusion Server Build Resource
+Represents a VirtFusion server build. The existence and shape of this API endpoint under this fork's deployment is unconfirmed; Create/Update/Delete are not implemented.
 
 ## Example Usage
 
@@ -30,14 +30,18 @@ resource "virtfusion_build" "node1" {
 
 ### Required
 
-- `name` (String) Server Name
-- `osid` (Number) Server Operating System ID
-- `server_id` (Number) Server ID
+- `hostname` (String)
+- `name` (String)
+- `server_id` (Number)
 
 ### Optional
 
-- `email` (Boolean) Server Email
-- `hostname` (String) Server Hostname
-- `ipv6` (Boolean) Server IPv6
-- `ssh_keys` (List of Number) Server SSH Keys IDs
-- `vnc` (Boolean) Server VNC
+- `email` (Boolean)
+- `ipv6` (Boolean)
+- `osid` (Number)
+- `ssh_keys` (List of Number)
+- `vnc` (Boolean)
+
+### Read-Only
+
+- `id` (Number) The ID of this resource.
