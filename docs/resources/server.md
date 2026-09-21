@@ -3,12 +3,12 @@
 page_title: "virtfusion_server Resource - terraform-provider-virtfusion"
 subcategory: ""
 description: |-
-  
+  Virtfusion Server Resource
 ---
 
 # virtfusion_server (Resource)
 
-
+Virtfusion Server Resource
 
 ## Example Usage
 
