@@ -3,12 +3,12 @@
 page_title: "virtfusion_build Resource - terraform-provider-virtfusion"
 subcategory: ""
 description: |-
-  Represents a VirtFusion server build.
+  Virtfusion Server Build Resource
 ---
 
 # virtfusion_build (Resource)
 
-Represents a VirtFusion server build.
+Virtfusion Server Build Resource
 
 ## Example Usage
 
