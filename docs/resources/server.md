@@ -47,7 +47,7 @@ resource "virtfusion_server" "node1" {
 - `boot_order` (String) One of "hdd,cdrom" or "cdrom,hdd".
 - `boot_type` (String) One of "uefi" or "bios". Write-only: the real API does not return this on read, so it is not refreshed from the server — only what you last applied.
 - `create_id` (String) Opaque create-option ID within the resource pack (see `GET /resourcePack/{resourcePackId}`), required for Create.
-- `name` (String)
+- `name` (String) Confirmed live: the real create endpoint has no name field, and a freshly created (not yet built) server rejects renames with 409. Omit this on the apply that creates the server; set it on a later apply after building it with virtfusion_server_build.
 - `override_cpu_cores` (Number) CPU core count override. Only used for variable resource pack options.
 - `override_memory_mb` (Number) Memory override in MB. Only used (and only meaningful) for resource pack options with a variable size; ignored for fixed-size packs.
 - `override_storage_gb` (Number) Storage override in GB. Only used for variable resource pack options.
@@ -65,7 +65,7 @@ resource "virtfusion_server" "node1" {
 - `iso_mounted` (Boolean)
 - `memory` (String) Raw memory string as returned by the API (e.g. "10240 MB").
 - `migrating` (Boolean)
-- `network` (Attributes) (see [below for nested schema](#nestedatt--network))
+- `network` (Attributes) Carries the prior state value forward during Update (`UseStateForUnknown`): the Go model uses a pointer struct for this object, which — unlike `types.Object` — cannot represent an Unknown value, so it must never be left Unknown in a plan Update() decodes. (see [below for nested schema](#nestedatt--network))
 - `protected` (Boolean)
 - `rescue` (Boolean)
 - `state` (String) Unconfirmed semantics; observed as null in testing. Passed through as-is.

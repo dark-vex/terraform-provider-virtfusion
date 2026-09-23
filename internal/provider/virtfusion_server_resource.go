@@ -14,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -208,6 +209,10 @@ func (r *VirtfusionServerResource) Schema(ctx context.Context, req resource.Sche
 				},
 			},
 			"name": schema.StringAttribute{
+				MarkdownDescription: "Confirmed live: the real create endpoint has no name field, and a " +
+					"freshly created (not yet built) server rejects renames with 409. Omit this on the apply " +
+					"that creates the server; set it on a later apply after building it with " +
+					"virtfusion_server_build.",
 				Optional: true,
 				Computed: true,
 			},
@@ -257,11 +262,20 @@ func (r *VirtfusionServerResource) Schema(ctx context.Context, req resource.Sche
 				},
 			},
 			"network": schema.SingleNestedAttribute{
+				MarkdownDescription: "Carries the prior state value forward during Update (`UseStateForUnknown`): " +
+					"the Go model uses a pointer struct for this object, which — unlike `types.Object` — cannot " +
+					"represent an Unknown value, so it must never be left Unknown in a plan Update() decodes.",
 				Computed: true,
+				PlanModifiers: []planmodifier.Object{
+					objectplanmodifier.UseStateForUnknown(),
+				},
 				Attributes: map[string]schema.Attribute{
 					"primary": schema.SingleNestedAttribute{
 						Computed:   true,
 						Attributes: networkInterfaceAttributes(),
+						PlanModifiers: []planmodifier.Object{
+							objectplanmodifier.UseStateForUnknown(),
+						},
 					},
 					"secondary": schema.ListNestedAttribute{
 						Computed: true,
@@ -273,6 +287,9 @@ func (r *VirtfusionServerResource) Schema(ctx context.Context, req resource.Sche
 			},
 			"current_monthly_period": schema.SingleNestedAttribute{
 				Computed: true,
+				PlanModifiers: []planmodifier.Object{
+					objectplanmodifier.UseStateForUnknown(),
+				},
 				Attributes: map[string]schema.Attribute{
 					"start": schema.StringAttribute{Computed: true},
 					"end":   schema.StringAttribute{Computed: true},
@@ -314,10 +331,43 @@ func (r *VirtfusionServerResource) ImportState(ctx context.Context, req resource
 }
 
 func (r *VirtfusionServerResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	// Deliberately not req.Plan.Get(ctx, &data): on Create there is no prior
+	// state, so every Computed-only attribute (network,
+	// current_monthly_period, ...) is Unknown in the plan, and the pointer
+	// struct types used for nested objects (e.g. *VirtfusionServerNetworkModel)
+	// cannot represent Unknown — only Null. Pull just the plan-supplied
+	// inputs Create actually needs instead; everything else is populated
+	// from the real server object via applyServerToModel below.
 	var data VirtfusionServerResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("resource_pack_id"), &data.ResourcePackID)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("create_id"), &data.CreateID)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("override_memory_mb"), &data.OverrideMemoryMB)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("override_storage_gb"), &data.OverrideStorage)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("override_cpu_cores"), &data.OverrideCPUCores)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("boot_type"), &data.BootType)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("auto_configuration"), &data.AutoConfiguration)...)
+	var planName types.String
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("name"), &planName)...)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+
+	// These three are Optional+Computed ("only used for variable resource
+	// pack options"): if the user didn't set one, its plan value is Unknown
+	// rather than Null (nothing forces it known), but neither the create
+	// payload nor applyServerToModel ever populates it afterward — the
+	// physical result lives in the separate `memory`/`storage`/`cpu`
+	// fields instead. Left as Unknown, State.Set would fail apply's
+	// all-values-must-be-known check. Since an unused override has no
+	// meaningful value, Null is the correct final state, not Unknown.
+	if data.OverrideMemoryMB.IsUnknown() {
+		data.OverrideMemoryMB = types.Int64Null()
+	}
+	if data.OverrideStorage.IsUnknown() {
+		data.OverrideStorage = types.Int64Null()
+	}
+	if data.OverrideCPUCores.IsUnknown() {
+		data.OverrideCPUCores = types.Int64Null()
 	}
 
 	if data.ResourcePackID.IsNull() || data.CreateID.IsNull() {
@@ -389,6 +439,50 @@ func (r *VirtfusionServerResource) Create(ctx context.Context, req resource.Crea
 	}
 
 	applyServerToModel(*server, &data)
+
+	// The create endpoint has no name field (confirmed against the real API
+	// spec: only memory/storage/cpuCores), so a server always starts out
+	// with whatever default name the panel assigns. Reconcile immediately if
+	// the config requested a specific name, otherwise the plan's known
+	// `name` value would mismatch the applied state.
+	//
+	// Confirmed live: a just-created server (before it has been built via
+	// virtfusion_server_build) rejects PUT .../name with 409 "server is not
+	// in a valid state" — not transient, still 409 after a 5s retry. If that
+	// happens, surface a clear explanation instead of either a cryptic
+	// Terraform-core "inconsistent result" error or a bare "409" message.
+	if !planName.IsNull() && !planName.IsUnknown() && !planName.Equal(data.Name) {
+		body, _ := json.Marshal(map[string]interface{}{"name": planName.ValueString()})
+		httpReq, err := newAPIRequest(ctx, r.config, "PUT", stdpath.Join(apiServerPath(data.ID.ValueString()), "name"), body)
+		if err != nil {
+			resp.Diagnostics.AddError("Error creating request", err.Error())
+			return
+		}
+		httpResp, err := r.client.Do(httpReq)
+		if err != nil {
+			resp.Diagnostics.AddError("API request failed", err.Error())
+			return
+		}
+		httpResp.Body.Close()
+		if httpResp.StatusCode == http.StatusConflict {
+			resp.Diagnostics.AddError(
+				"Cannot set name at creation time",
+				fmt.Sprintf(
+					"Server %s was created successfully, but the real API refused to set its name (409: not in "+
+						"a valid state) because it has not been built yet. Omit `name` on the apply that creates "+
+						"this server, build it with virtfusion_server_build, then set `name` on a later apply.",
+					data.ID.ValueString(),
+				),
+			)
+			return
+		}
+		if httpResp.StatusCode != http.StatusOK && httpResp.StatusCode != http.StatusNoContent {
+			resp.Diagnostics.AddError("Unexpected API Response", fmt.Sprintf("PUT .../name status: %d", httpResp.StatusCode))
+			return
+		}
+		data.Name = planName
+	}
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
