@@ -40,7 +40,7 @@ resource "virtfusion_build" "node1" {
 
 - `hostname` (String)
 - `ipv6` (Boolean)
-- `name` (String)
+- `name` (String) Confirmed live: required by the real API (422 `"You must provide a name for this server"` if omitted) even though the account's own OpenAPI spec lists only `method` as required. Kept `Optional` at the schema level (validated in `Create` instead) to match this resource's existing pattern for `template_id`.
 - `ssh_keys` (List of Number)
 - `swap` (Number) Swap size in MB (see `GET /server/{serverId}/swap` for valid values).
 - `template_id` (Number) Operating system template ID (see `GET /server/{serverId}/operatingSystemTemplates`). Required when method is "template".

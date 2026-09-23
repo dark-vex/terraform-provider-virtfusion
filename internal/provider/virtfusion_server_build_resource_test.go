@@ -63,7 +63,9 @@ func TestVirtfusionServerBuildResource_Create_RequestShape(t *testing.T) {
 		case req.Method == http.MethodGet:
 			taskPolls++
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"id":99,"action":"build","completed":true,"status":"complete","success":true}`))
+			// Confirmed live: wrapped as {"data": {...}}, not the bare
+			// object previously assumed.
+			_, _ = w.Write([]byte(`{"data":{"id":99,"action":"build","completed":true,"status":"complete","success":true}}`))
 		}
 	}))
 	defer srv.Close()
@@ -77,6 +79,7 @@ func TestVirtfusionServerBuildResource_Create_RequestShape(t *testing.T) {
 		ServerID:   types.StringValue(serverID),
 		Method:     types.StringValue("template"),
 		TemplateID: types.Int64Value(21),
+		Name:       types.StringValue("test-server"),
 		SSHKeys:    []types.Int64{types.Int64Value(1851)},
 	}
 	if diags := plan.Set(ctx, &model); diags.HasError() {
@@ -146,6 +149,42 @@ func TestVirtfusionServerBuildResource_Create_RequiresTemplateID(t *testing.T) {
 
 	if !createResp.Diagnostics.HasError() {
 		t.Error("Create with method=template and unset template_id did not return an error")
+	}
+	if hits != 0 {
+		t.Errorf("Create reached the test server %d time(s), want 0", hits)
+	}
+}
+
+// TestVirtfusionServerBuildResource_Create_RequiresName verifies Create
+// fails fast without any HTTP call when name is unset — confirmed live that
+// the real API 422s with "You must provide a name for this server" despite
+// the account's own OpenAPI spec listing only "method" as required.
+func TestVirtfusionServerBuildResource_Create_RequiresName(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		hits++
+	}))
+	defer srv.Close()
+
+	r := newTestBuildResource(t, srv.URL)
+	ctx := context.Background()
+
+	s := buildSchemaFor(t, r)
+	plan := tfsdk.Plan{Schema: s.Schema}
+	model := VirtfusionServerBuildResourceModel{
+		ServerID:   types.StringValue("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
+		Method:     types.StringValue("template"),
+		TemplateID: types.Int64Value(21),
+	}
+	if diags := plan.Set(ctx, &model); diags.HasError() {
+		t.Fatalf("failed to build test plan: %v", diags)
+	}
+
+	createResp := &resource.CreateResponse{State: tfsdk.State{Schema: s.Schema}}
+	r.Create(ctx, resource.CreateRequest{Plan: plan}, createResp)
+
+	if !createResp.Diagnostics.HasError() {
+		t.Error("Create with unset name did not return an error")
 	}
 	if hits != 0 {
 		t.Errorf("Create reached the test server %d time(s), want 0", hits)

@@ -87,8 +87,18 @@ func pollTask(ctx context.Context, client *http.Client, cfg *ProviderConfig, ser
 			return nil, err
 		}
 
-		var task APITask
-		decodeErr := json.NewDecoder(resp.Body).Decode(&task)
+		// Confirmed live: unlike the mutating endpoints that trigger a task
+		// (which wrap it as {"data":{"task": {...}}}, see APITaskEnvelope),
+		// GET /server/{serverId}/task/{taskId} wraps it one level shallower
+		// as {"data": {...}} — not fully unwrapped as previously assumed.
+		// Decoding straight into APITask left every field (including
+		// Completed) at its zero value, so this loop never observed
+		// completion and always ran out the full 60-attempt budget even
+		// when the task had actually finished on the first poll.
+		var envelope struct {
+			Data APITask `json:"data"`
+		}
+		decodeErr := json.NewDecoder(resp.Body).Decode(&envelope)
 		resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
@@ -98,7 +108,8 @@ func pollTask(ctx context.Context, client *http.Client, cfg *ProviderConfig, ser
 			return nil, decodeErr
 		}
 
-		if task.Completed {
+		if envelope.Data.Completed {
+			task := envelope.Data
 			return &task, nil
 		}
 

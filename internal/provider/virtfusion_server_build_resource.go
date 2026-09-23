@@ -105,6 +105,10 @@ func (r *VirtfusionServerBuildResource) Schema(ctx context.Context, req resource
 				},
 			},
 			"name": schema.StringAttribute{
+				MarkdownDescription: "Confirmed live: required by the real API (422 `\"You must provide a " +
+					"name for this server\"` if omitted) even though the account's own OpenAPI spec lists only " +
+					"`method` as required. Kept `Optional` at the schema level (validated in `Create` instead) " +
+					"to match this resource's existing pattern for `template_id`.",
 				Optional: true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
@@ -170,6 +174,15 @@ func (r *VirtfusionServerBuildResource) Create(ctx context.Context, req resource
 
 	if data.Method.ValueString() == "template" && data.TemplateID.IsNull() {
 		resp.Diagnostics.AddError("Missing template_id", `template_id is required when method is "template".`)
+		return
+	}
+
+	// The account's own OpenAPI spec lists only "method" as required, but
+	// confirmed live: the real endpoint rejects a build with
+	// {"errors":["You must provide a name for this server"]} whenever name
+	// is omitted — the spec is incomplete on this point.
+	if data.Name.IsNull() {
+		resp.Diagnostics.AddError("Missing name", `name is required by the real API even though the account's own OpenAPI spec doesn't list it — confirmed live via a 422 ("You must provide a name for this server").`)
 		return
 	}
 

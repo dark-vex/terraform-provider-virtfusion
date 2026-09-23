@@ -46,12 +46,12 @@ resource "virtfusion_server" "node1" {
 - `auto_configuration` (Boolean) Write-only, see `boot_type`.
 - `boot_order` (String) One of "hdd,cdrom" or "cdrom,hdd".
 - `boot_type` (String) One of "uefi" or "bios". Write-only: the real API does not return this on read, so it is not refreshed from the server — only what you last applied.
-- `create_id` (String) Opaque create-option ID within the resource pack (see `GET /resourcePack/{resourcePackId}`), required for Create.
+- `create_id` (String) Opaque create-option ID within the resource pack (see `GET /resourcePack/{resourcePackId}`), required for Create. See `resource_pack_id` for why `UseStateForUnknown` matters here too.
 - `name` (String) Confirmed live: the real create endpoint has no name field, and a freshly created (not yet built) server rejects renames with 409. Omit this on the apply that creates the server; set it on a later apply after building it with virtfusion_server_build.
-- `override_cpu_cores` (Number) CPU core count override. Only used for variable resource pack options.
-- `override_memory_mb` (Number) Memory override in MB. Only used (and only meaningful) for resource pack options with a variable size; ignored for fixed-size packs.
-- `override_storage_gb` (Number) Storage override in GB. Only used for variable resource pack options.
-- `resource_pack_id` (Number) Resource pack ID to create the server from (see `GET /resourcePack`). Optional+Computed rather than Required so an imported server never shows a forced replace — but it (and `create_id`) must be set in config for `Create` to succeed.
+- `override_cpu_cores` (Number) CPU core count override. Only used for variable resource pack options. See `resource_pack_id` for why `UseStateForUnknown` matters here too.
+- `override_memory_mb` (Number) Memory override in MB. Only used (and only meaningful) for resource pack options with a variable size; ignored for fixed-size packs. See `resource_pack_id` for why `UseStateForUnknown` matters here too.
+- `override_storage_gb` (Number) Storage override in GB. Only used for variable resource pack options. See `resource_pack_id` for why `UseStateForUnknown` matters here too.
+- `resource_pack_id` (Number) Resource pack ID to create the server from (see `GET /resourcePack`). Optional+Computed rather than Required so an imported server never shows a forced replace — but it (and `create_id`) must be set in config for `Create` to succeed. `UseStateForUnknown` so unrelated updates (e.g. `name`) don't spuriously force a replace too: without it, this Computed+RequiresReplace attribute goes Unknown on every plan where config changes at all, confirmed live to force a full destroy+recreate on what should have been a narrow, no-op-here in-place update.
 
 ### Read-Only
 
@@ -69,7 +69,7 @@ resource "virtfusion_server" "node1" {
 - `protected` (Boolean)
 - `rescue` (Boolean)
 - `state` (String) Unconfirmed semantics; observed as null in testing. Passed through as-is.
-- `storage` (Attributes List) (see [below for nested schema](#nestedatt--storage))
+- `storage` (Attributes List) Confirmed live: without `UseStateForUnknown`, this Go slice-backed Computed attribute can't represent Unknown either — Update() decoding the full plan (which leaves it Unknown whenever anything else in config changes) crashed with the same class of Value Conversion Error as `network`/`current_monthly_period` originally did on Create(). (see [below for nested schema](#nestedatt--storage))
 - `suspended` (Boolean)
 - `uefi` (Boolean)
 - `vnc_enabled` (Boolean)

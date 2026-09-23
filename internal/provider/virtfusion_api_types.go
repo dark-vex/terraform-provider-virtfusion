@@ -3,6 +3,8 @@
 
 package provider
 
+import "encoding/json"
+
 // Typed representations of the real VirtFusion API shape, taken from the
 // account's own OpenAPI spec (https://vps.hostbrr.com/account/api) plus
 // live GET verification. This intentionally does not model fields that
@@ -105,17 +107,39 @@ type APITaskEnvelope struct {
 	} `json:"data"`
 }
 
-// APITask is the status of a single async job, also returned directly (not
-// wrapped) by GET /server/{serverId}/task/{taskId}.
+// APITask is the status of a single async job. GET /server/{serverId}/task/{taskId}
+// confirmed live to wrap it as {"data": {...}} — one level shallower than
+// APITaskEnvelope's {"data":{"task": {...}}}, not fully unwrapped as
+// previously assumed (see pollTask in client.go).
 type APITask struct {
-	ID        int    `json:"id"`
-	Action    string `json:"action"`
-	Started   string `json:"started"`
-	Updated   string `json:"updated"`
-	Finished  string `json:"finished"`
-	Completed bool   `json:"completed"`
-	Status    string `json:"status"`
-	Success   bool   `json:"success"`
+	ID        int       `json:"id"`
+	Action    string    `json:"action"`
+	Started   string    `json:"started"`
+	Updated   string    `json:"updated"`
+	Finished  string    `json:"finished"`
+	Completed bool      `json:"completed"`
+	Status    string    `json:"status"`
+	Success   looseBool `json:"success"`
+}
+
+// looseBool decodes a JSON boolean normally, but tolerates the real API's
+// confirmed-live behavior of returning "success" as an empty string (`""`)
+// while a task is still in progress, only becoming a real boolean once the
+// task completes. A plain bool field hard-fails decoding that shape.
+type looseBool bool
+
+func (b *looseBool) UnmarshalJSON(data []byte) error {
+	var asBool bool
+	if err := json.Unmarshal(data, &asBool); err == nil {
+		*b = looseBool(asBool)
+		return nil
+	}
+	var asString string
+	if err := json.Unmarshal(data, &asString); err == nil {
+		*b = looseBool(asString == "true")
+		return nil
+	}
+	return nil
 }
 
 // APISSHKey is one entry in the account's SSH key list.

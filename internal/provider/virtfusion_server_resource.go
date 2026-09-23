@@ -14,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -167,45 +168,58 @@ func (r *VirtfusionServerResource) Schema(ctx context.Context, req resource.Sche
 			"resource_pack_id": schema.Int64Attribute{
 				MarkdownDescription: "Resource pack ID to create the server from (see `GET /resourcePack`). " +
 					"Optional+Computed rather than Required so an imported server never shows a forced " +
-					"replace — but it (and `create_id`) must be set in config for `Create` to succeed.",
+					"replace — but it (and `create_id`) must be set in config for `Create` to succeed. " +
+					"`UseStateForUnknown` so unrelated updates (e.g. `name`) don't spuriously force a " +
+					"replace too: without it, this Computed+RequiresReplace attribute goes Unknown on " +
+					"every plan where config changes at all, confirmed live to force a full destroy+recreate " +
+					"on what should have been a narrow, no-op-here in-place update.",
 				Optional: true,
 				Computed: true,
 				PlanModifiers: []planmodifier.Int64{
 					int64planmodifier.RequiresReplace(),
+					int64planmodifier.UseStateForUnknown(),
 				},
 			},
 			"create_id": schema.StringAttribute{
 				MarkdownDescription: "Opaque create-option ID within the resource pack (see " +
-					"`GET /resourcePack/{resourcePackId}`), required for Create.",
+					"`GET /resourcePack/{resourcePackId}`), required for Create. See `resource_pack_id` for " +
+					"why `UseStateForUnknown` matters here too.",
 				Optional: true,
 				Computed: true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"override_memory_mb": schema.Int64Attribute{
 				MarkdownDescription: "Memory override in MB. Only used (and only meaningful) for resource " +
-					"pack options with a variable size; ignored for fixed-size packs.",
+					"pack options with a variable size; ignored for fixed-size packs. See `resource_pack_id` " +
+					"for why `UseStateForUnknown` matters here too.",
 				Optional: true,
 				Computed: true,
 				PlanModifiers: []planmodifier.Int64{
 					int64planmodifier.RequiresReplace(),
+					int64planmodifier.UseStateForUnknown(),
 				},
 			},
 			"override_storage_gb": schema.Int64Attribute{
-				MarkdownDescription: "Storage override in GB. Only used for variable resource pack options.",
-				Optional:            true,
-				Computed:            true,
+				MarkdownDescription: "Storage override in GB. Only used for variable resource pack options. " +
+					"See `resource_pack_id` for why `UseStateForUnknown` matters here too.",
+				Optional: true,
+				Computed: true,
 				PlanModifiers: []planmodifier.Int64{
 					int64planmodifier.RequiresReplace(),
+					int64planmodifier.UseStateForUnknown(),
 				},
 			},
 			"override_cpu_cores": schema.Int64Attribute{
-				MarkdownDescription: "CPU core count override. Only used for variable resource pack options.",
-				Optional:            true,
-				Computed:            true,
+				MarkdownDescription: "CPU core count override. Only used for variable resource pack options. " +
+					"See `resource_pack_id` for why `UseStateForUnknown` matters here too.",
+				Optional: true,
+				Computed: true,
 				PlanModifiers: []planmodifier.Int64{
 					int64planmodifier.RequiresReplace(),
+					int64planmodifier.UseStateForUnknown(),
 				},
 			},
 			"name": schema.StringAttribute{
@@ -251,7 +265,15 @@ func (r *VirtfusionServerResource) Schema(ctx context.Context, req resource.Sche
 				Computed:            true,
 			},
 			"storage": schema.ListNestedAttribute{
+				MarkdownDescription: "Confirmed live: without `UseStateForUnknown`, this Go slice-backed " +
+					"Computed attribute can't represent Unknown either — Update() decoding the full plan " +
+					"(which leaves it Unknown whenever anything else in config changes) crashed with the " +
+					"same class of Value Conversion Error as `network`/`current_monthly_period` originally " +
+					"did on Create().",
 				Computed: true,
+				PlanModifiers: []planmodifier.List{
+					listplanmodifier.UseStateForUnknown(),
+				},
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"capacity": schema.StringAttribute{Computed: true},
