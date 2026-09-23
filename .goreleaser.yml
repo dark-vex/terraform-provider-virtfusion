@@ -28,21 +28,15 @@ checksum:
   # Checksums filename must NOT include the leading "v" (already correct)
   name_template: "terraform-provider-virtfusion_{{ .Version }}_SHA256SUMS"
 
-signs:
-  - cmd: gpg
-    args:
-      [
-        "--batch",
-        "--yes",
-        "--local-user", "485EB74C6A039FC89BE5359DE3A58B345981499F",
-        "--detach-sign", "${artifact}"
-      ]
-    artifacts: checksum
-    signature: "${artifact}.sig"
-    output: true
-
+# GPG signing intentionally removed: the fingerprint here was the original
+# upstream maintainer's key (inherited via fork), not one this fork holds
+# the private half of, and no GPG_PRIVATE_KEY secret was ever configured —
+# every release run would have failed at this step even once triggering was
+# fixed. This fork isn't published to the Terraform Registry (see README),
+# so registry-grade signing isn't required. Tracked as a follow-up if that
+# ever changes.
 
 release:
   github:
-    owner: snowsidejon
+    owner: dark-vex
     name: terraform-provider-virtfusion

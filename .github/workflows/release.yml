@@ -17,11 +17,11 @@ jobs:
         with:
           go-version: 1.25
 
-      - name: Import GPG key
-        run: |
-          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
-        shell: bash
-
+      # GPG signing removed: no GPG_PRIVATE_KEY secret was ever configured,
+      # and the fingerprint previously hardcoded here belonged to the
+      # original upstream maintainer, not this fork. This fork isn't
+      # published to the Terraform Registry (see README), so registry-grade
+      # signing isn't required. Revisit if that changes.
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -30,4 +30,3 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GPG_FINGERPRINT: 485EB74C6A039FC89BE5359DE3A58B345981499F
