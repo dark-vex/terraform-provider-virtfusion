@@ -37,7 +37,7 @@ block, or reference this fork's own release once published.
 terraform {
   required_providers {
     virtfusion = {
-      source  = "snowsidejon/virtfusion"
+      source  = "dark-vex/virtfusion"
       version = "1.1.0"
     }
   }
