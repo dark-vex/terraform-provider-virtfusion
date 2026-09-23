@@ -3,25 +3,28 @@
 page_title: "virtfusion_build Resource - terraform-provider-virtfusion"
 subcategory: ""
 description: |-
-  Virtfusion Server Build Resource
+  Triggers a VirtFusion server build (OS install/rebuild) via POST /server/{serverId}/build. This is a stateless action on the real API, not a persistent object — there is no update or delete endpoint. Every attribute is RequiresReplace: changing any of them re-runs the (destructive) build. Delete only removes this resource from Terraform state; it never calls the API, since there is nothing to undo.
 ---
 
 # virtfusion_build (Resource)
 
-Virtfusion Server Build Resource
+Triggers a VirtFusion server build (OS install/rebuild) via `POST /server/{serverId}/build`. This is a stateless action on the real API, not a persistent object — there is no update or delete endpoint. Every attribute is `RequiresReplace`: changing any of them re-runs the (destructive) build. `Delete` only removes this resource from Terraform state; it never calls the API, since there is nothing to undo.
 
 ## Example Usage
 
 ```terraform
+# virtfusion_build triggers a server build/rebuild action (POST
+# /server/{serverId}/build). It is not a persistent object on the real API
+# — every attribute is RequiresReplace, and changing any of them re-runs
+# the (destructive) build.
 resource "virtfusion_build" "node1" {
-  server_id = virtfusion_server.node1.id
-  name      = "node1-demo"
-  hostname  = "node1.example.com"
-  osid      = 1
-  vnc       = true
-  ipv6      = true
-  ssh_keys  = [virtfusion_ssh.dummy_key.id]
-  email     = true
+  server_id   = virtfusion_server.node1.id
+  method      = "template"
+  template_id = 21 # see GET /server/{serverId}/operatingSystemTemplates
+  hostname    = "node1.example.com"
+  timezone    = "America/Los_Angeles"
+  ipv6        = true
+  ssh_keys    = [virtfusion_ssh.dummy_key.id]
 }
 ```
 
@@ -30,14 +33,21 @@ resource "virtfusion_build" "node1" {
 
 ### Required
 
-- `name` (String) Server Name
-- `osid` (Number) Server Operating System ID
-- `server_id` (Number) Server ID
+- `method` (String) "template" or "self".
+- `server_id` (String) Target server UUID.
 
 ### Optional
 
-- `email` (Boolean) Server Email
-- `hostname` (String) Server Hostname
-- `ipv6` (Boolean) Server IPv6
-- `ssh_keys` (List of Number) Server SSH Keys IDs
-- `vnc` (Boolean) Server VNC
+- `hostname` (String)
+- `ipv6` (Boolean)
+- `name` (String) Confirmed live: required by the real API (422 `"You must provide a name for this server"` if omitted) even though the account's own OpenAPI spec lists only `method` as required. Kept `Optional` at the schema level (validated in `Create` instead) to match this resource's existing pattern for `template_id`.
+- `ssh_keys` (List of Number)
+- `swap` (Number) Swap size in MB (see `GET /server/{serverId}/swap` for valid values).
+- `template_id` (Number) Operating system template ID (see `GET /server/{serverId}/operatingSystemTemplates`). Required when method is "template".
+- `timezone` (String) IANA timezone name, e.g. "America/Los_Angeles".
+- `user_data` (String) Cloud-init user data.
+
+### Read-Only
+
+- `id` (String) Equal to `server_id` — build has no identity of its own.
+- `task_id` (Number) Informational only — the async task id the build triggered. Not a stable identifier (the task is transient), never used as resource identity.

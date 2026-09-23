@@ -1,15 +1,19 @@
 package provider
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	stdpath "path"
 	"strconv"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -25,9 +29,12 @@ type VirtfusionSSHResource struct {
 	config *ProviderConfig
 }
 
+// VirtfusionSSHResourceModel has no user_id: the real API scopes SSH keys
+// to the account via the bearer token, not a request field. There is no
+// update endpoint on the real API either — name/public_key are
+// RequiresReplace.
 type VirtfusionSSHResourceModel struct {
 	ID        types.Int64  `tfsdk:"id"`
-	UserID    types.Int64  `tfsdk:"user_id"`
 	Name      types.String `tfsdk:"name"`
 	PublicKey types.String `tfsdk:"public_key"`
 }
@@ -38,18 +45,23 @@ func (r *VirtfusionSSHResource) Metadata(ctx context.Context, req resource.Metad
 
 func (r *VirtfusionSSHResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		MarkdownDescription: "Represents a VirtFusion account SSH key. The real API has no update endpoint " +
+			"for SSH keys, so `name`/`public_key` are `RequiresReplace`.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.Int64Attribute{
 				Computed: true,
 			},
-			"user_id": schema.Int64Attribute{
-				Required: true,
-			},
 			"name": schema.StringAttribute{
 				Required: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
 			},
 			"public_key": schema.StringAttribute{
 				Required: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
 			},
 		},
 	}
@@ -81,50 +93,77 @@ func (r *VirtfusionSSHResource) Create(ctx context.Context, req resource.CreateR
 	}
 
 	payload := map[string]interface{}{
-		"user_id":    data.UserID.ValueInt64(),
-		"name":       data.Name.ValueString(),
-		"public_key": data.PublicKey.ValueString(),
+		"name":      data.Name.ValueString(),
+		"publicKey": data.PublicKey.ValueString(),
 	}
 
 	body, _ := json.Marshal(payload)
-	reqURL := r.config.Endpoint + "/api/v1/ssh-keys"
 
-	httpReq, err := http.NewRequest("POST", reqURL, bytes.NewBuffer(body))
+	httpReq, err := newAPIRequest(ctx, r.config, "POST", "/account/sshKeys", body)
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating request", err.Error())
 		return
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+r.config.ApiToken)
 
 	httpResp, err := r.client.Do(httpReq)
 	if err != nil {
 		resp.Diagnostics.AddError("API request failed", err.Error())
 		return
 	}
-	defer httpResp.Body.Close()
 
-	if httpResp.StatusCode != 200 && httpResp.StatusCode != 201 {
+	// The documented create response is the same paginated list envelope as
+	// a plain list — but live testing against a real deployment showed a
+	// 200 with a completely empty body instead (the key is still created
+	// server-side either way). Try the documented shape first; if the body
+	// is empty or doesn't parse, fall back to a fresh list+scan by
+	// public_key rather than erroring out on an already-succeeded create.
+	bodyBytes, readErr := io.ReadAll(httpResp.Body)
+	httpResp.Body.Close()
+
+	if httpResp.StatusCode != http.StatusOK && httpResp.StatusCode != http.StatusCreated {
 		resp.Diagnostics.AddError(
 			"Unexpected API Response",
 			fmt.Sprintf("Status: %d", httpResp.StatusCode),
 		)
 		return
 	}
-
-	var respData map[string]interface{}
-	if err := json.NewDecoder(httpResp.Body).Decode(&respData); err != nil {
-		resp.Diagnostics.AddError("Error decoding API response", err.Error())
+	if readErr != nil {
+		resp.Diagnostics.AddError("Error reading API response", readErr.Error())
 		return
 	}
 
-	if id, ok := respData["id"].(float64); ok {
-		data.ID = types.Int64Value(int64(id))
+	var key APISSHKey
+	found := false
+	if len(bodyBytes) > 0 {
+		var envelope APISSHKeyListEnvelope
+		if err := json.Unmarshal(bodyBytes, &envelope); err == nil {
+			key, found = findSSHKeyByPublicKey(envelope.Data, data.PublicKey.ValueString())
+		}
 	}
 
+	if !found {
+		keys, diags := r.listAllSSHKeys(ctx)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		key, found = findSSHKeyByPublicKey(keys, data.PublicKey.ValueString())
+	}
+	if !found {
+		resp.Diagnostics.AddError(
+			"SSH key not found after creation",
+			"The key was submitted successfully, but no key matching the submitted public_key could be found "+
+				"afterward (checked the create response and a fresh list).",
+		)
+		return
+	}
+
+	data.ID = types.Int64Value(key.ID)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
+// Read has no GET-by-id to call — the real API only exposes a paginated
+// list, so this lists (following pagination if needed) and filters by id.
 func (r *VirtfusionSSHResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var data VirtfusionSSHResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
@@ -132,60 +171,30 @@ func (r *VirtfusionSSHResource) Read(ctx context.Context, req resource.ReadReque
 		return
 	}
 
-	reqURL := r.config.Endpoint + "/api/v1/ssh-keys/" + strconv.FormatInt(data.ID.ValueInt64(), 10)
-	httpReq, _ := http.NewRequest("GET", reqURL, nil)
-	httpReq.Header.Set("Authorization", "Bearer "+r.config.ApiToken)
-
-	httpResp, err := r.client.Do(httpReq)
-	if err != nil {
-		resp.Diagnostics.AddError("API request failed", err.Error())
-		return
-	}
-	defer httpResp.Body.Close()
-
-	if httpResp.StatusCode == 404 {
-		resp.State.RemoveResource(ctx)
-		return
-	}
-	if httpResp.StatusCode != 200 {
-		resp.Diagnostics.AddError("Unexpected API Response", fmt.Sprintf("Status: %d", httpResp.StatusCode))
-		return
-	}
-
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
-}
-
-func (r *VirtfusionSSHResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var data VirtfusionSSHResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
+	keys, diags := r.listAllSSHKeys(ctx)
+	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	reqURL := r.config.Endpoint + "/api/v1/ssh-keys/" + strconv.FormatInt(data.ID.ValueInt64(), 10)
-	payload := map[string]interface{}{
-		"name":       data.Name.ValueString(),
-		"public_key": data.PublicKey.ValueString(),
-	}
-
-	body, _ := json.Marshal(payload)
-	httpReq, _ := http.NewRequest("PUT", reqURL, bytes.NewBuffer(body))
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+r.config.ApiToken)
-
-	httpResp, err := r.client.Do(httpReq)
-	if err != nil {
-		resp.Diagnostics.AddError("API request failed", err.Error())
-		return
-	}
-	defer httpResp.Body.Close()
-
-	if httpResp.StatusCode != 200 {
-		resp.Diagnostics.AddError("Unexpected API Response", fmt.Sprintf("Status: %d", httpResp.StatusCode))
+	key, found := findSSHKeyByID(keys, data.ID.ValueInt64())
+	if !found {
+		resp.State.RemoveResource(ctx)
 		return
 	}
 
+	data.Name = types.StringValue(key.Name)
+	data.PublicKey = types.StringValue(key.PublicKey)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+}
+
+// Update is unreachable: both attributes are RequiresReplace (the real API
+// has no update endpoint), so Terraform always does Delete+Create instead.
+func (r *VirtfusionSSHResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	resp.Diagnostics.AddError(
+		"virtfusion_ssh has no Update",
+		"Both attributes are RequiresReplace; Terraform should never call Update for this resource.",
+	)
 }
 
 func (r *VirtfusionSSHResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -195,9 +204,12 @@ func (r *VirtfusionSSHResource) Delete(ctx context.Context, req resource.DeleteR
 		return
 	}
 
-	reqURL := r.config.Endpoint + "/api/v1/ssh-keys/" + strconv.FormatInt(data.ID.ValueInt64(), 10)
-	httpReq, _ := http.NewRequest("DELETE", reqURL, nil)
-	httpReq.Header.Set("Authorization", "Bearer "+r.config.ApiToken)
+	relPath := stdpath.Join("/account/sshKeys", strconv.FormatInt(data.ID.ValueInt64(), 10))
+	httpReq, err := newAPIRequest(ctx, r.config, "DELETE", relPath, nil)
+	if err != nil {
+		resp.Diagnostics.AddError("Error creating request", err.Error())
+		return
+	}
 
 	httpResp, err := r.client.Do(httpReq)
 	if err != nil {
@@ -206,8 +218,73 @@ func (r *VirtfusionSSHResource) Delete(ctx context.Context, req resource.DeleteR
 	}
 	defer httpResp.Body.Close()
 
-	if httpResp.StatusCode != 200 && httpResp.StatusCode != 204 {
+	if httpResp.StatusCode != http.StatusOK && httpResp.StatusCode != http.StatusNoContent {
 		resp.Diagnostics.AddError("Unexpected API Response", fmt.Sprintf("Status: %d", httpResp.StatusCode))
 		return
+	}
+}
+
+func findSSHKeyByPublicKey(keys []APISSHKey, publicKey string) (APISSHKey, bool) {
+	for _, k := range keys {
+		if k.PublicKey == publicKey {
+			return k, true
+		}
+	}
+	return APISSHKey{}, false
+}
+
+func findSSHKeyByID(keys []APISSHKey, id int64) (APISSHKey, bool) {
+	for _, k := range keys {
+		if k.ID == id {
+			return k, true
+		}
+	}
+	return APISSHKey{}, false
+}
+
+// listAllSSHKeys walks GET /account/sshKeys, following next_page_url until
+// it runs out of pages, and returns every key on the account.
+func (r *VirtfusionSSHResource) listAllSSHKeys(ctx context.Context) ([]APISSHKey, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	var all []APISSHKey
+
+	httpReq, err := newAPIRequest(ctx, r.config, "GET", "/account/sshKeys", nil)
+	if err != nil {
+		diags.AddError("Error creating request", err.Error())
+		return nil, diags
+	}
+
+	for {
+		httpResp, err := r.client.Do(httpReq)
+		if err != nil {
+			diags.AddError("API request failed", err.Error())
+			return nil, diags
+		}
+
+		var envelope APISSHKeyListEnvelope
+		decodeErr := json.NewDecoder(httpResp.Body).Decode(&envelope)
+		status := httpResp.StatusCode
+		httpResp.Body.Close()
+
+		if status != http.StatusOK {
+			diags.AddError("Unexpected API Response", fmt.Sprintf("unexpected status %d listing SSH keys", status))
+			return nil, diags
+		}
+		if decodeErr != nil {
+			diags.AddError("Error decoding API response", decodeErr.Error())
+			return nil, diags
+		}
+
+		all = append(all, envelope.Data...)
+
+		if envelope.NextPageURL == nil {
+			return all, nil
+		}
+
+		httpReq, err = newAPIRequestAbsolute(ctx, "GET", *envelope.NextPageURL, nil)
+		if err != nil {
+			diags.AddError("Error creating request", err.Error())
+			return nil, diags
+		}
 	}
 }

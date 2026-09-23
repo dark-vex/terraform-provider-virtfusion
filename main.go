@@ -39,7 +39,7 @@ func main() {
 	flag.Parse()
 
 	opts := providerserver.ServeOpts{
-		Address: "registry.terraform.io/snowsidejon/virtfusion",
+		Address: "registry.terraform.io/dark-vex/virtfusion",
 		Debug:   debug,
 	}
 

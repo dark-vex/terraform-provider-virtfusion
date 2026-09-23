@@ -1,15 +1,16 @@
 terraform {
   required_providers {
     virtfusion = {
-      source  = "snowsidejon/virtfusion"
-      version = "1.0.2"
+      source  = "dark-vex/virtfusion"
+      version = "1.1.0"
     }
   }
 }
 
-# Default endpoint = cloud.breezehost.io
-# Default values for resource_package, os_template, etc. come from env vars.
+# endpoint and api_token are both required; this fork has no default panel
+# host, since it targets one specific VirtFusion deployment.
 provider "virtfusion" {
+  endpoint  = "example.com"
   api_token = var.api_token
 }
 
