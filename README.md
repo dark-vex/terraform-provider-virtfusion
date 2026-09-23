@@ -2,26 +2,12 @@
 
 ![Terraform](https://img.shields.io/badge/Terraform-%235835CC.svg?style=for-the-badge&logo=terraform&logoColor=white)
 ![Go](https://img.shields.io/badge/Go-00ADD8?style=for-the-badge&logo=go&logoColor=white)
-![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/snowsidejon/terraform-provider-virtfusion)
+![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/dark-vex/terraform-provider-virtfusion)
 
 ## Overview
 
 This is a fork of [snowsidejon/terraform-provider-virtfusion](https://github.com/snowsidejon/terraform-provider-virtfusion),
-rewritten against the real VirtFusion API for one specific deployment
-(pulled straight from that account's own OpenAPI documentation, not
-guessed). It is **not** intended to be upstreamed — the endpoint/payload
-shapes here are specific to that deployment, not generic VirtFusion
-behavior.
-
-The original upstream provider had never successfully issued a working
-request against a real VirtFusion API: every resource built request URLs by
-string-concatenating the endpoint, which the transport then mangled into a
-doubled, malformed URL. On top of that, every mutating endpoint's payload
-shape was guessed and, once the URL bug was fixed and checked against the
-real API spec, turned out to be almost entirely wrong (wrong paths, wrong
-field names, wrong request/response shapes, and in some cases operations
-that don't exist as CRUD at all). This fork fixes the URL/auth plumbing and
-reimplements all three resources against the confirmed real API.
+rewritten against VirtFusion v7.0.x API.
 
 - 🔑 Environment variable support for easy automation
 - 🧩 Fork of the community provider on the [Terraform Registry](https://registry.terraform.io/providers/snowsidejon/virtfusion/latest)
